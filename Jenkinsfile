@@ -280,8 +280,7 @@ except Exception: print(0)
 
                         docker build -t ${BACKEND_IMAGE}:${BUILD_TAG} ./backend
                         docker tag ${BACKEND_IMAGE}:${BUILD_TAG} ${BACKEND_IMAGE}:latest
-
-                        docker build \
+                        docker build --no-cache \
                             --build-arg VITE_API_BASE_URL=http://${VM_IP}:8000 \
                             --build-arg VITE_KEYCLOAK_URL=http://${VM_IP}:8080 \
                             --build-arg VITE_KEYCLOAK_REALM=myrealm \
