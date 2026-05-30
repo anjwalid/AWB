@@ -506,9 +506,9 @@ print(total)
                         # GARDE-FOU 4 : compose distant ne declare QUE APP_SERVICES
                         # ============================================================
                         echo "[*] [G4] Verification compose distant..."
-                        DECLARED=$(ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no \
-                        ${SSH_USER}@${VM_IP} \
-                        'bash -lc "cd ~/awb-deploy && docker compose config --services | sort | tr '\''\n'\'' '\'' '\''"')
+                       DECLARED=$(ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no \
+                       ${SSH_USER}@${VM_IP} \
+                       "cd ~/awb-deploy && docker compose config --services" | sort | xargs)
                         echo "    Services compose distant: '${DECLARED}'"
                         for svc in ${APP_SERVICES}; do
                             if ! echo "${DECLARED}" | grep -qw "${svc}"; then
