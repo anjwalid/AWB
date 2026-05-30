@@ -1,3 +1,4 @@
+```yaml
 # =============================================================
 # DOCKER-COMPOSE.PROD.YML
 # Application : backend + frontend uniquement.
@@ -9,7 +10,7 @@
 
 services:
   backend:
-    image: ${DOCKERHUB_USER}/awb-backend:${BUILD_TAG:-latest}
+    image: ${HARBOR_REGISTRY}/${HARBOR_PROJECT}/awb-backend:${BUILD_TAG:-latest}
     container_name: awb-backend
     env_file:
       - .env
@@ -26,7 +27,7 @@ services:
     # Le restart: unless-stopped + healthcheck cote infra suffisent
 
   frontend:
-    image: ${DOCKERHUB_USER}/awb-frontend:${BUILD_TAG:-latest}
+    image: ${HARBOR_REGISTRY}/${HARBOR_PROJECT}/awb-frontend:${BUILD_TAG:-latest}
     container_name: awb-frontend
     ports:
       - "5173:80"
@@ -44,3 +45,4 @@ networks:
   app-network:
     name: app-network
     external: true
+```
