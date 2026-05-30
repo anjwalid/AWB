@@ -137,23 +137,26 @@ except Exception: print(0)
                                 withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
                                     sh '''
                                         set +e
+                        
                                         docker run --rm --network host \
                                             -v "${WORKSPACE}:/usr/src" \
-                                            -e SONAR_HOST_URL=${SONAR_HOST_URL} \
                                             sonarsource/sonar-scanner-cli \
                                             -Dsonar.projectKey=awb-app \
                                             -Dsonar.host.url=${SONAR_HOST_URL} \
                                             -Dsonar.login=${SONAR_TOKEN} \
                                             -Dsonar.qualitygate.wait=false \
                                             > ${REPORTS_DIR}/sonarqube/scan.log 2>&1
+                        
                                         SONAR_RC=$?
                                         tail -20 ${REPORTS_DIR}/sonarqube/scan.log
-                                        if [ "${SONAR_RC}" -ne 0 ] && [ "${DP_FORCE_BUILD}" != "true" ]; then exit 1; fi
+                        
+                                        if [ "${SONAR_RC}" -ne 0 ] && [ "${DP_FORCE_BUILD}" != "true" ]; then
+                                            exit 1
+                                        fi
                                     '''
                                 }
                             }
                         }
-
                         stage('[SECURITY] SCA — CycloneDX + DTrack') {
                             steps {
                                 withCredentials([string(credentialsId: 'dtrack-api-key', variable: 'DTRACK_API_KEY')]) {
