@@ -1,12 +1,4 @@
-```yaml
-# =============================================================
-# DOCKER-COMPOSE.PROD.YML
-# Application : backend + frontend uniquement.
-# Gere par le pipeline Jenkins (rolling update a chaque build).
-#
-# Pre-requis : docker-compose.infra.yml doit etre UP au prealable
-# (postgres_db, keycloak, node-exporter, reseau app-network).
-# =============================================================
+
 
 services:
   backend:
