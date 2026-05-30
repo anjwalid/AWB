@@ -1,5 +1,5 @@
 // =============================================================
-// AWB DEVSECOPS PIPELINE
+// AWB DEVSECOPS PIPELINE — HARBOR VERSION
 //
 // STACK SUR VM DESKTOP (172.16.39.131) :
 //   - awb-backend-1   (awb-backend)              -> A REDEPLOYER
@@ -8,6 +8,24 @@
 //   - keycloak        (quay.io/keycloak/keycloak)-> SCAN ONLY, JAMAIS TOUCHER
 //   - node-exporter   (prom/node-exporter)       -> JAMAIS TOUCHER
 // =============================================================
+
+// IMPORTANT JENKINS CREDENTIALS REQUIRED:
+// - harbor-creds      : Username/Password Harbor
+// - sonarqube-token   : Secret text
+// - dtrack-api-key    : Secret text
+// - vm-desktop-ip     : Secret text
+// - vm-desktop-ssh    : SSH Username with private key
+// - app-backend-env   : Secret file
+// - app-root-env      : Secret file
+
+// IMPORTANT DOCKER CONFIG:
+// On Jenkins machine AND deployment VM, if Harbor is HTTP, add:
+// /etc/docker/daemon.json
+// {
+//   "dns": ["8.8.8.8", "1.1.1.1"],
+//   "insecure-registries": ["206.189.31.29:11180"]
+// }
+
 
 def securityStatus = "PENDING"
 def qualityStatus  = "PENDING"
@@ -28,7 +46,7 @@ pipeline {
         choice(name: 'TARGET_ENV', choices: ['dev', 'staging', 'prod'],
                description: 'Environnement cible (dev = auto-approve)')
         booleanParam(name: 'SKIP_DEPLOY', defaultValue: false,
-                     description: 'Sauter le deploiement (build + scan uniquement)')
+                     description: 'Sauter le deploiement (build + scan + push uniquement)')
         booleanParam(name: 'FORCE_BUILD', defaultValue: false,
                      description: 'Forcer le build meme si security FAIL')
     }
@@ -39,9 +57,13 @@ pipeline {
         REPORTS_DIR   = "/opt/ai-security/app-pipeline/reports"
 
         BUILD_TAG      = "${BUILD_NUMBER}"
-        DOCKERHUB_USER = "abduuu0"
-        BACKEND_IMAGE  = "abduuu0/awb-backend"
-        FRONTEND_IMAGE = "abduuu0/awb-frontend"
+
+        // Harbor Registry
+        HARBOR_REGISTRY = "206.189.31.29:11180"
+        HARBOR_PROJECT  = "awb"
+
+        BACKEND_IMAGE  = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/awb-backend"
+        FRONTEND_IMAGE = "${HARBOR_REGISTRY}/${HARBOR_PROJECT}/awb-frontend"
 
         // Images tierces a SCANNER mais JAMAIS a redeployer
         POSTGRES_IMAGE = "postgres:16-alpine"
@@ -73,6 +95,10 @@ pipeline {
                     mkdir -p ${REPORTS_DIR}/{gitleaks,sonarqube,sca,trivy,deploy,quality}
                     echo "============================================================"
                     echo " AWB DEVSECOPS PIPELINE - Build ${BUILD_NUMBER}"
+                    echo " Harbor Registry        : ${HARBOR_REGISTRY}"
+                    echo " Harbor Project         : ${HARBOR_PROJECT}"
+                    echo " Backend image          : ${BACKEND_IMAGE}:${BUILD_TAG}"
+                    echo " Frontend image         : ${FRONTEND_IMAGE}:${BUILD_TAG}"
                     echo " App services (rolling) : ${APP_SERVICES}"
                     echo " Containers proteges    : ${PROTECTED_CONTAINERS}"
                     echo " Trivy scan             : backend, frontend, ${POSTGRES_IMAGE}, ${KEYCLOAK_IMAGE}"
@@ -105,6 +131,7 @@ except Exception: print(0)
                                 '''
                             }
                         }
+
                         stage('[SECURITY] SonarQube SAST') {
                             steps {
                                 withCredentials([string(credentialsId: 'sonarqube-token', variable: 'SONAR_TOKEN')]) {
@@ -125,6 +152,7 @@ except Exception: print(0)
                                 }
                             }
                         }
+
                         stage('[SECURITY] SCA — CycloneDX + DTrack') {
                             steps {
                                 withCredentials([string(credentialsId: 'dtrack-api-key', variable: 'DTRACK_API_KEY')]) {
@@ -183,6 +211,7 @@ except Exception: print(0)
                                 '''
                             }
                         }
+
                         stage('[QUALITY] Frontend TypeCheck') {
                             steps {
                                 sh '''
@@ -195,6 +224,7 @@ except Exception: print(0)
                                 '''
                             }
                         }
+
                         stage('[QUALITY] Backend Tests') {
                             steps {
                                 sh '''
@@ -243,6 +273,7 @@ except Exception: print(0)
                     sh '''
                         set -e
                         echo "[*] === Build images applicatives uniquement ==="
+
                         docker build -t ${BACKEND_IMAGE}:${BUILD_TAG} ./backend
                         docker tag ${BACKEND_IMAGE}:${BUILD_TAG} ${BACKEND_IMAGE}:latest
 
@@ -271,11 +302,11 @@ except Exception: print(0)
                     echo "    THIRD (info only): postgres:16-alpine + keycloak:latest"
 
                     # Pull des images tierces sur le serveur Jenkins UNIQUEMENT
-                    # (la VM Desktop n est PAS touchee)
+                    # La VM Desktop n est PAS touchee
                     docker pull ${POSTGRES_IMAGE} || echo "  WARN pull postgres"
                     docker pull ${KEYCLOAK_IMAGE} || echo "  WARN pull keycloak"
 
-                    # ---- APP images : gate ACTIVE ----
+                    # APP images : gate ACTIVE
                     for img in ${BACKEND_IMAGE}:${BUILD_TAG} ${FRONTEND_IMAGE}:${BUILD_TAG}; do
                         IMG_NAME=$(echo $img | sed "s|/|_|g; s|:|_|g")
                         echo "[Trivy APP] $img"
@@ -285,7 +316,7 @@ except Exception: print(0)
                             | tee ${REPORTS_DIR}/trivy/app_${IMG_NAME}.txt
                     done
 
-                    # ---- THIRD-PARTY : visibilite uniquement ----
+                    # THIRD-PARTY : visibilite uniquement
                     for img in ${POSTGRES_IMAGE} ${KEYCLOAK_IMAGE}; do
                         IMG_NAME=$(echo $img | sed "s|/|_|g; s|:|_|g")
                         echo "[Trivy 3rd] $img"
@@ -329,29 +360,38 @@ print(total)
             }
         }
 
-        stage('Push Docker Hub') {
+        stage('Push Harbor') {
             steps {
                 withCredentials([usernamePassword(
-                    credentialsId: 'dockerhub-creds',
-                    usernameVariable: 'DH_USER',
-                    passwordVariable: 'DH_PASS'
+                    credentialsId: 'harbor-creds',
+                    usernameVariable: 'HARBOR_USER',
+                    passwordVariable: 'HARBOR_PASS'
                 )]) {
                     sh '''
                         set -e
-                        docker logout || true
-                        echo "${DH_PASS}" | docker login -u "${DH_USER}" --password-stdin
+                        echo "[*] === Push images vers Harbor ==="
+
+                        docker logout ${HARBOR_REGISTRY} || true
+
+                        echo "${HARBOR_PASS}" | docker login ${HARBOR_REGISTRY} \
+                            -u "${HARBOR_USER}" \
+                            --password-stdin
+
                         push_with_retry () {
                             for i in 1 2 3 4 5; do
                                 docker push $1 && return 0
+                                echo "Push failed, retry $i..."
                                 sleep 20
                             done
                             exit 1
                         }
+
                         push_with_retry ${BACKEND_IMAGE}:${BUILD_TAG}
                         push_with_retry ${BACKEND_IMAGE}:latest
                         push_with_retry ${FRONTEND_IMAGE}:${BUILD_TAG}
                         push_with_retry ${FRONTEND_IMAGE}:latest
-                        docker logout
+
+                        docker logout ${HARBOR_REGISTRY}
                     '''
                 }
             }
@@ -366,7 +406,10 @@ print(total)
                                       usernameVariable: 'SSH_USER'),
                     string(credentialsId: 'vm-desktop-ip', variable: 'VM_IP'),
                     file(credentialsId: 'app-backend-env', variable: 'BACKEND_ENV_FILE'),
-                    file(credentialsId: 'app-root-env', variable: 'ROOT_ENV_FILE')
+                    file(credentialsId: 'app-root-env', variable: 'ROOT_ENV_FILE'),
+                    usernamePassword(credentialsId: 'harbor-creds',
+                                     usernameVariable: 'HARBOR_USER',
+                                     passwordVariable: 'HARBOR_PASS')
                 ]) {
                     sh '''
                         set -e
@@ -441,12 +484,20 @@ print(total)
                             ${SSH_USER}@${VM_IP} \
                             "chmod 600 ~/awb-deploy/backend.env ~/awb-deploy/.env"
 
+                        # Update .env on remote VM
                         ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no \
                             ${SSH_USER}@${VM_IP} \
                             "cd ~/awb-deploy && \
-                             sed -i 's|^BUILD_TAG=.*|BUILD_TAG=${BUILD_TAG}|' .env && \
-                             sed -i 's|^DOCKERHUB_USER=.*|DOCKERHUB_USER=${DOCKERHUB_USER}|' .env && \
-                             grep -E '^(BUILD_TAG|DOCKERHUB_USER)=' .env"
+                             grep -q '^BUILD_TAG=' .env && sed -i 's|^BUILD_TAG=.*|BUILD_TAG=${BUILD_TAG}|' .env || echo 'BUILD_TAG=${BUILD_TAG}' >> .env && \
+                             grep -q '^HARBOR_REGISTRY=' .env && sed -i 's|^HARBOR_REGISTRY=.*|HARBOR_REGISTRY=${HARBOR_REGISTRY}|' .env || echo 'HARBOR_REGISTRY=${HARBOR_REGISTRY}' >> .env && \
+                             grep -q '^HARBOR_PROJECT=' .env && sed -i 's|^HARBOR_PROJECT=.*|HARBOR_PROJECT=${HARBOR_PROJECT}|' .env || echo 'HARBOR_PROJECT=${HARBOR_PROJECT}' >> .env && \
+                             grep -E '^(BUILD_TAG|HARBOR_REGISTRY|HARBOR_PROJECT)=' .env"
+
+                        # Login Harbor on remote VM before pull
+                        echo "[*] Login Harbor sur VM distante..."
+                        echo "${HARBOR_PASS}" | ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no \
+                            ${SSH_USER}@${VM_IP} \
+                            "docker login ${HARBOR_REGISTRY} -u '${HARBOR_USER}' --password-stdin"
 
                         # ============================================================
                         # GARDE-FOU 4 : compose distant ne declare QUE APP_SERVICES
@@ -475,7 +526,7 @@ print(total)
                         #   --no-deps         : ignore dependances
                         #   services nommes   : compose ne touche QUE backend frontend
                         # ============================================================
-                        echo "[*] Pull images..."
+                        echo "[*] Pull images depuis Harbor..."
                         ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no \
                             ${SSH_USER}@${VM_IP} \
                             "cd ~/awb-deploy && docker compose pull ${APP_SERVICES}"
@@ -556,14 +607,14 @@ print(total)
                 echo "============================================================"
 
                 sh """
-                    ${env.VENV}/bin/python ${env.APP_PIPELINE}/scripts/consolidate_app_report.py \\
-                        --reports-dir   "${env.REPORTS_DIR}" \\
-                        --security      "${securityStatus}" \\
-                        --quality       "${qualityStatus}" \\
-                        --build         "${buildStatus}" \\
-                        --deploy        "${deployStatus}" \\
-                        --build-id      "${env.BUILD_NUMBER}" \\
-                        --target-env    "${env.DP_TARGET_ENV}" \\
+                    ${env.VENV}/bin/python ${env.APP_PIPELINE}/scripts/consolidate_app_report.py \
+                        --reports-dir   "${env.REPORTS_DIR}" \
+                        --security      "${securityStatus}" \
+                        --quality       "${qualityStatus}" \
+                        --build         "${buildStatus}" \
+                        --deploy        "${deployStatus}" \
+                        --build-id      "${env.BUILD_NUMBER}" \
+                        --target-env    "${env.DP_TARGET_ENV}" \
                         --output        "${env.WORKSPACE}/consolidated_report.json" || true
                 """
             }
