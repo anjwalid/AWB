@@ -140,9 +140,10 @@ except Exception: print(0)
                                         docker run --rm --network host \
                                             -v "${WORKSPACE}:/usr/src" \
                                             -e SONAR_HOST_URL=${SONAR_HOST_URL} \
-                                            -e SONAR_TOKEN=${SONAR_TOKEN} \
                                             sonarsource/sonar-scanner-cli \
                                             -Dsonar.projectKey=awb-app \
+                                            -Dsonar.host.url=${SONAR_HOST_URL} \
+                                            -Dsonar.login=${SONAR_TOKEN} \
                                             -Dsonar.qualitygate.wait=false \
                                             > ${REPORTS_DIR}/sonarqube/scan.log 2>&1
                                         SONAR_RC=$?
