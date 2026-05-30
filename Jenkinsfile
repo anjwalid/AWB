@@ -507,8 +507,8 @@ print(total)
                         # ============================================================
                         echo "[*] [G4] Verification compose distant..."
                         DECLARED=$(ssh -i ${SSH_KEY} -o StrictHostKeyChecking=no \
-                            ${SSH_USER}@${VM_IP} \
-                            "cd ~/awb-deploy && docker compose config --services 2>/dev/null | sort | tr '\\n' ' '")
+                        ${SSH_USER}@${VM_IP} \
+                        'bash -lc "cd ~/awb-deploy && docker compose config --services | sort | tr '\''\n'\'' '\'' '\''"')
                         echo "    Services compose distant: '${DECLARED}'"
                         for svc in ${APP_SERVICES}; do
                             if ! echo "${DECLARED}" | grep -qw "${svc}"; then
